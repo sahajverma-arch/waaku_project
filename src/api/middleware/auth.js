@@ -44,7 +44,8 @@ const getSecureHash = (rawKey) => {
  */
 const validateApiKey = (req, res, next) => {
 	// Skip authentication for health and docs endpoints
-	const publicEndpoints = ['/health', '/api-docs', '/api', '/api-info', '/']
+	// NOTE: '/' was removed — it matched every path via startsWith() and disabled auth entirely
+	const publicEndpoints = ['/health', '/api-docs', '/api', '/api-info']
 
 	if (publicEndpoints.some(endpoint => req.path.startsWith(endpoint))) {
 		return next()

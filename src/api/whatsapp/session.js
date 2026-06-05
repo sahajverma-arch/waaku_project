@@ -5,9 +5,12 @@ const axios = require('axios')
 
 // Environment-aware Puppeteer runtime selection
 // Auto-detect Linux (Docker/VPS) to override macOS local settings in .env
-const RUNTIME = process.platform === 'linux' ? 'linux' : (process.env.WAAKU_RUNTIME || 'mac')
+const RUNTIME = process.platform === 'linux' ? 'linux'
+	: process.platform === 'win32' ? 'windows'
+	: (process.env.WAAKU_RUNTIME || 'mac')
 const isLinux = RUNTIME === 'linux'
 const isMac = RUNTIME === 'mac'
+const isWindows = RUNTIME === 'windows'
 
 function buildPuppeteerOptions() {
 	const commonArgs = [
@@ -36,14 +39,30 @@ function buildPuppeteerOptions() {
 		'--no-default-browser-check',
 	]
 
+	// Windows: bundled Chromium hangs on launch unless the sandbox is disabled
+	const windowsArgs = [
+		'--no-sandbox',
+		'--disable-setuid-sandbox',
+		'--disable-gpu',
+		'--disable-dev-shm-usage',
+		'--no-first-run',
+		'--no-default-browser-check',
+	]
+
 	const options = {
 		headless: true,
-		args: [...commonArgs, ...(isLinux ? linuxArgs : macArgs)],
+		args: [...commonArgs, ...(isLinux ? linuxArgs : isWindows ? windowsArgs : macArgs)],
 	}
 
 	// Set executable path based on runtime
 	if (isLinux) {
 		options.executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium-browser'
+	} else if (isWindows) {
+		// On Windows, prefer an explicit Chrome/Chromium path if provided,
+		// otherwise let Puppeteer use its bundled Chromium (executablePath stays undefined)
+		if (process.env.WAAKU_CHROME_PATH) {
+			options.executablePath = process.env.WAAKU_CHROME_PATH
+		}
 	} else if (isMac) {
 		// For macOS, use Chrome if available or custom path
 		options.executablePath = process.env.WAAKU_CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
