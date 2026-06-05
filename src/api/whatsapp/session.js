@@ -141,16 +141,23 @@ function createSession(id) {
 		}
 	}
 
-	const client = new Client({
-		authStrategy: new LocalAuth({ clientId: id }),
-		puppeteer: buildPuppeteerOptions(),
-		/*
-		webVersionCache: {
-			type: 'remote',
-			remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1036673976-alpha.html'
-		}
-		*/
-	})
+	let client
+	try {
+		client = new Client({
+			authStrategy: new LocalAuth({ clientId: id }),
+			puppeteer: buildPuppeteerOptions(),
+			/*
+			webVersionCache: {
+				type: 'remote',
+				remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1036673976-alpha.html'
+			}
+			*/
+		})
+	} catch (err) {
+		// Surface the REAL error from Client construction / config instead of swallowing it
+		console.error(`[${id}] FAILED to construct WhatsApp Client:`, err)
+		throw err
+	}
 
 	client.on('qr', (qr) => {
 		console.log(`[${id}] QR RECEIVED`)
@@ -323,8 +330,8 @@ function createSession(id) {
 		}
 	})
 
-	client.initialize()
-
+	// Register the session BEFORE launching so event handlers and the
+	// initialize() callbacks below can safely reference sessions[id].
 	sessions[id] = {
 		client,
 		qr: null,
@@ -335,6 +342,32 @@ function createSession(id) {
 		createdAt: new Date(),
 		lastActivity: new Date()
 	}
+
+	// initialize() is async: this is where Puppeteer actually launches Chromium.
+	// Previously it was fire-and-forget, so any launch failure became a silent
+	// unhandled rejection and the real error was never logged. Catch it here.
+	client.initialize()
+		.then(async () => {
+			let chromeVersion = 'unknown'
+			try {
+				if (client.pupBrowser) chromeVersion = await client.pupBrowser.version()
+			} catch (_) {}
+			console.log(`[${id}] LAUNCH OK — Chrome version: ${chromeVersion}`)
+		})
+		.catch((err) => {
+			console.error(`[${id}] FAILED to launch Puppeteer / create session:`, err)
+			if (sessions[id]) {
+				sessions[id].status = 'launch_failed'
+				sessions[id].error = err && err.message ? err.message : String(err)
+				sessions[id].lastActivity = new Date()
+			}
+			const io = getIO()
+			if (io) {
+				io.emit('session:error', { id, error: sessions[id] ? sessions[id].error : String(err) })
+				io.emit('sessions:update', listSessions())
+			}
+		})
+
 	return sessions[id]
 }
 
